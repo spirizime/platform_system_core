@@ -1,19 +1,19 @@
 /* tools/mkbootimg/mkbootimg.c
-**
-** Copyright 2007, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License");
-** you may not use this file except in compliance with the License.
-** You may obtain a copy of the License at
-**
-**     http://www.apache.org/licenses/LICENSE-2.0
-**
-** Unless required by applicable law or agreed to in writing, software
-** distributed under the License is distributed on an "AS IS" BASIS,
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-** See the License for the specific language governing permissions and
-** limitations under the License.
-*/
+ **
+ ** Copyright 2007, The Android Open Source Project
+ **
+ ** Licensed under the Apache License, Version 2.0 (the "License");
+ ** you may not use this file except in compliance with the License.
+ ** You may obtain a copy of the License at
+ **
+ **     http://www.apache.org/licenses/LICENSE-2.0
+ **
+ ** Unless required by applicable law or agreed to in writing, software
+ ** distributed under the License is distributed on an "AS IS" BASIS,
+ ** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ ** See the License for the specific language governing permissions and
+ ** limitations under the License.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,25 +30,25 @@ static void *load_file(const char *fn, unsigned *_sz)
     char *data;
     int sz;
     int fd;
-
+    
     data = 0;
     fd = open(fn, O_RDONLY);
     if(fd < 0) return 0;
-
+    
     sz = lseek(fd, 0, SEEK_END);
     if(sz < 0) goto oops;
-
+    
     if(lseek(fd, 0, SEEK_SET) != 0) goto oops;
-
+    
     data = (char*) malloc(sz);
     if(data == 0) goto oops;
-
+    
     if(read(fd, data, sz) != sz) goto oops;
     close(fd);
-
+    
     if(_sz) *_sz = sz;
     return data;
-
+    
 oops:
     close(fd);
     if(data != 0) free(data);
@@ -65,6 +65,9 @@ int usage(void)
             "       [ --board <boardname> ]\n"
             "       [ --base <address> ]\n"
             "       [ --pagesize <pagesize> ]\n"
+            "       [ --dt <filename> ]\n"
+            "       [ --ramdisk_offset <address> ]\n"
+            "       [ --tags_offset <address> ]\n"
             "       -o|--output <filename>\n"
             );
     return 1;
@@ -72,19 +75,19 @@ int usage(void)
 
 
 
-static unsigned char padding[16384] = { 0, };
+static unsigned char padding[131072] = { 0, };
 
 int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 {
     unsigned pagemask = pagesize - 1;
     ssize_t count;
-
+    
     if((itemsize & pagemask) == 0) {
         return 0;
     }
-
+    
     count = pagesize - (itemsize & pagemask);
-
+    
     if(write(fd, padding, count) != count) {
         return -1;
     } else {
@@ -95,7 +98,7 @@ int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 int main(int argc, char **argv)
 {
     boot_img_hdr hdr;
-
+    
     char *kernel_fn = 0;
     void *kernel_data = 0;
     char *ramdisk_fn = 0;
@@ -105,6 +108,8 @@ int main(int argc, char **argv)
     char *cmdline = "";
     char *bootimg = 0;
     char *board = "";
+    char *dt_fn = 0;
+    void *dt_data = 0;
     unsigned pagesize = 2048;
     int fd;
     SHA_CTX ctx;
@@ -115,12 +120,12 @@ int main(int argc, char **argv)
     unsigned second_offset  = 0x00f00000;
     unsigned tags_offset    = 0x00000100;
     size_t cmdlen;
-
+    
     argc--;
     argv++;
-
+    
     memset(&hdr, 0, sizeof(hdr));
-
+    
     while(argc > 0){
         char *arg = argv[0];
         char *val = argv[1];
@@ -154,45 +159,49 @@ int main(int argc, char **argv)
         } else if(!strcmp(arg,"--pagesize")) {
             pagesize = strtoul(val, 0, 10);
             if ((pagesize != 2048) && (pagesize != 4096)
-                && (pagesize != 8192) && (pagesize != 16384)) {
+                && (pagesize != 8192) && (pagesize != 16384)
+                && (pagesize != 32768) && (pagesize != 65536)
+                && (pagesize != 131072)) {
                 fprintf(stderr,"error: unsupported page size %d\n", pagesize);
                 return -1;
             }
+        } else if(!strcmp(arg, "--dt")) {
+            dt_fn = val;
         } else {
             return usage();
         }
     }
     hdr.page_size = pagesize;
-
+    
     hdr.kernel_addr =  base + kernel_offset;
     hdr.ramdisk_addr = base + ramdisk_offset;
     hdr.second_addr =  base + second_offset;
     hdr.tags_addr =    base + tags_offset;
-
+    
     if(bootimg == 0) {
         fprintf(stderr,"error: no output filename specified\n");
         return usage();
     }
-
+    
     if(kernel_fn == 0) {
         fprintf(stderr,"error: no kernel image specified\n");
         return usage();
     }
-
+    
     if(ramdisk_fn == 0) {
         fprintf(stderr,"error: no ramdisk image specified\n");
         return usage();
     }
-
+    
     if(strlen(board) >= BOOT_NAME_SIZE) {
         fprintf(stderr,"error: board name too large\n");
         return usage();
     }
-
+    
     strcpy((char *) hdr.name, board);
-
+    
     memcpy(hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
-
+    
     cmdlen = strlen(cmdline);
     if(cmdlen > (BOOT_ARGS_SIZE + BOOT_EXTRA_ARGS_SIZE - 2)) {
         fprintf(stderr,"error: kernel commandline too large\n");
@@ -206,13 +215,13 @@ int main(int argc, char **argv)
         cmdline += (BOOT_ARGS_SIZE - 1);
         strncpy((char *)hdr.extra_cmdline, cmdline, BOOT_EXTRA_ARGS_SIZE);
     }
-
+    
     kernel_data = load_file(kernel_fn, &hdr.kernel_size);
     if(kernel_data == 0) {
         fprintf(stderr,"error: could not load kernel '%s'\n", kernel_fn);
         return 1;
     }
-
+    
     if(!strcmp(ramdisk_fn,"NONE")) {
         ramdisk_data = 0;
         hdr.ramdisk_size = 0;
@@ -223,7 +232,7 @@ int main(int argc, char **argv)
             return 1;
         }
     }
-
+    
     if(second_fn) {
         second_data = load_file(second_fn, &hdr.second_size);
         if(second_data == 0) {
@@ -231,7 +240,15 @@ int main(int argc, char **argv)
             return 1;
         }
     }
-
+    
+    if(dt_fn) {
+        dt_data = load_file(dt_fn, &hdr.dt_size);
+        if (dt_data == 0) {
+            fprintf(stderr,"error: could not load device tree image '%s'\n", dt_fn);
+            return 1;
+        }
+    }
+    
     /* put a hash of the contents in the header so boot images can be
      * differentiated based on their first 2k.
      */
@@ -242,32 +259,40 @@ int main(int argc, char **argv)
     SHA_update(&ctx, &hdr.ramdisk_size, sizeof(hdr.ramdisk_size));
     SHA_update(&ctx, second_data, hdr.second_size);
     SHA_update(&ctx, &hdr.second_size, sizeof(hdr.second_size));
+    if(dt_data) {
+        SHA_update(&ctx, dt_data, hdr.dt_size);
+        SHA_update(&ctx, &hdr.dt_size, sizeof(hdr.dt_size));
+    }
     sha = SHA_final(&ctx);
     memcpy(hdr.id, sha,
            SHA_DIGEST_SIZE > sizeof(hdr.id) ? sizeof(hdr.id) : SHA_DIGEST_SIZE);
-
+    
     fd = open(bootimg, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if(fd < 0) {
         fprintf(stderr,"error: could not create '%s'\n", bootimg);
         return 1;
     }
-
+    
     if(write(fd, &hdr, sizeof(hdr)) != sizeof(hdr)) goto fail;
     if(write_padding(fd, pagesize, sizeof(hdr))) goto fail;
-
+    
     if(write(fd, kernel_data, hdr.kernel_size) != (ssize_t) hdr.kernel_size) goto fail;
     if(write_padding(fd, pagesize, hdr.kernel_size)) goto fail;
-
+    
     if(write(fd, ramdisk_data, hdr.ramdisk_size) != (ssize_t) hdr.ramdisk_size) goto fail;
     if(write_padding(fd, pagesize, hdr.ramdisk_size)) goto fail;
-
+    
     if(second_data) {
         if(write(fd, second_data, hdr.second_size) != (ssize_t) hdr.second_size) goto fail;
         if(write_padding(fd, pagesize, hdr.second_size)) goto fail;
     }
-
+    
+    if(dt_data) {
+        if(write(fd, dt_data, hdr.dt_size) != (ssize_t) hdr.dt_size) goto fail;
+        if(write_padding(fd, pagesize, hdr.dt_size)) goto fail;
+    }
     return 0;
-
+    
 fail:
     unlink(bootimg);
     close(fd);
