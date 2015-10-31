@@ -69,7 +69,14 @@ struct selabel_handle *sehandle_prop;
 
 static int property_triggers_enabled = 0;
 
+#ifndef BOARD_CHARGING_CMDLINE_NAME
+#define BOARD_CHARGING_CMDLINE_NAME "androidboot.battchg_pause"
+#define BOARD_CHARGING_CMDLINE_VALUE "true"
+#endif
+
 static char qemu[32];
+static char battchg_pause[32];
+bool is_charger = false;
 
 static struct action *cur_action = NULL;
 static struct command *cur_command = NULL;
@@ -782,6 +789,8 @@ static void import_kernel_nv(char *name, bool for_emulator)
 
     if (!strcmp(name,"qemu")) {
         strlcpy(qemu, value, sizeof(qemu));
+    } else if (!strcmp(name,BOARD_CHARGING_CMDLINE_NAME)) {
+            strlcpy(battchg_pause, value, sizeof(battchg_pause));
     } else if (!strncmp(name, "androidboot.", 12) && name_len > 12) {
         const char *boot_prop_name = name + 12;
         char prop[PROP_NAME_MAX];
@@ -986,6 +995,25 @@ static void selinux_initialize(bool in_kernel_domain) {
     }
 }
 
+static int charging_mode_booting(void)
+{
+#ifndef BOARD_CHARGING_MODE_BOOTING_LPM
+    return 0;
+#else
+    int f;
+    char cmb;
+    f = open(BOARD_CHARGING_MODE_BOOTING_LPM, O_RDONLY);
+    if (f < 0)
+    return 0;
+    
+    if (1 != read(f, (void *)&cmb,1))
+    return 0;
+    
+    close(f);
+    return ('1' == cmb);
+#endif
+}
+
 int main(int argc, char** argv) {
     if (!strcmp(basename(argv[0]), "ueventd")) {
         return ueventd_main(argc, argv);
@@ -1095,12 +1123,21 @@ int main(int argc, char** argv) {
     // wasn't ready immediately after wait_for_coldboot_done
     queue_builtin_action(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
 
+    /* Older bootloaders use non-standard charging modes. Check for
+     * those now, after mounting the filesystems */
+    if (strcmp(battchg_pause, BOARD_CHARGING_CMDLINE_VALUE) == 0)
+    is_charger = 1;
+    
     // Don't mount filesystems or start core system services in charger mode.
     char bootmode[PROP_VALUE_MAX];
     if (property_get("ro.bootmode", bootmode) > 0 && strcmp(bootmode, "charger") == 0) {
         action_for_each_trigger("charger", action_add_queue_tail);
     } else {
-        action_for_each_trigger("late-init", action_add_queue_tail);
+        if (charging_mode_booting() || is_charger == 1) {
+            action_for_each_trigger("charger", action_add_queue_tail);
+        } else {
+            action_for_each_trigger("late-init", action_add_queue_tail);
+        }
     }
 
     // Run all property triggers based on current state of the properties.

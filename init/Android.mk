@@ -48,6 +48,16 @@ LOCAL_SRC_FILES:= \
     ueventd.cpp \
     ueventd_parser.cpp \
     watchdogd.cpp \
+    
+SYSTEM_CORE_INIT_DEFINES := BOARD_CHARGING_MODE_BOOTING_LPM  \
+    BOARD_CHARGING_CMDLINE_NAME \
+    BOARD_CHARGING_CMDLINE_VALUE
+
+$(foreach system_core_init_define,$(SYSTEM_CORE_INIT_DEFINES), \
+  $(if $($(system_core_init_define)), \
+    $(eval LOCAL_CFLAGS += -D$(system_core_init_define)=\"$($(system_core_init_define))\") \
+  ) \
+)
 
 LOCAL_MODULE:= init
 LOCAL_C_INCLUDES += \
