@@ -24,7 +24,14 @@ class Service;
 
 #define COMMAND_RETRY_TIMEOUT 5
 
-extern const char *ENV[64];
+#ifdef MTK_HARDWARE
+    // xen0n: some MTK services (e.g. ril-daemon-mtk) require very large number
+    // of sockets, which can't be contained in 32 entries minus other variables.
+    extern const char *ENV[64];
+#else
+    extern const char *ENV[32];
+#endif
+
 extern bool waiting_for_exec;
 extern int have_console;
 extern std::string console_name;
